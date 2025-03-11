@@ -1,0 +1,270 @@
+import React, { useContext, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { Download, RefreshCw, Home } from 'lucide-react';
+import { BudgetContext } from '../App';
+import minervaLogo from '../assets/logo.jpeg';
+
+// Category colors
+const COLORS = [
+  '#4361EE', // Fixed Expenses
+  '#3A86FF', // Savings
+  '#50E3C2', // Food
+  '#7B4DFB', // Transportation
+  '#D92BAB', // Entertainment
+  '#FCAB5B', // Personal
+  '#6FCAD8'  // Gym
+];
+
+// Mock API call for recommendations (in a real app, this would be a fetch to backend)
+const getRecommendations = (userData) => {
+  return new Promise((resolve) => {
+    // Simulate API delay
+    setTimeout(() => {
+      const totalIncome = userData.income.work_study + userData.income.external;
+      const savingsAmount = totalIncome * (userData.savings_goal / 100);
+      const fixedExpenses = userData.fixed_expenses.loans + userData.fixed_expenses.other;
+      
+      // Calculate available money for discretionary spending
+      const availableMoney = totalIncome - savingsAmount - fixedExpenses;
+      
+      // Simple algorithm for distributing available money based on preferences
+      const preferenceTotals = Object.values(userData.spending_preferences).reduce((a, b) => a + b, 0);
+      
+      // Base allocations
+      const allocations = {
+        'Fixed Expenses': fixedExpenses,
+        'Savings': savingsAmount,
+        'Food': 0,
+        'Transportation': 0,
+        'Entertainment': 0,
+        'Personal': 0,
+        'Gym': 0
+      };
+      
+      // Allocate discretionary spending
+      if (availableMoney > 0 && preferenceTotals > 0) {
+        const categoryMap = {
+          food: 'Food',
+          transportation: 'Transportation',
+          entertainment: 'Entertainment',
+          personal: 'Personal',
+          gym: 'Gym'
+        };
+        
+        // Apply city multiplier (simplified)
+        const cityMultipliers = {
+          'San Francisco': 1.0,
+          'Berlin': 0.65,
+          'Taipei': 0.55,
+          'Hyderabad': 0.40,
+          'Seoul': 0.70,
+          'Buenos Aires': 0.50
+        };
+        
+        const multiplier = cityMultipliers[userData.location] || 1.0;
+        
+        // Distribute based on preferences
+        for (const [key, preference] of Object.entries(userData.spending_preferences)) {
+          const category = categoryMap[key];
+          
+          // Base allocation proportional to preference strength
+          let baseAllocation = (preference / preferenceTotals) * availableMoney;
+          
+          // Adjust allocation based on city
+          baseAllocation = baseAllocation * multiplier;
+          
+          allocations[category] = baseAllocation;
+        }
+      }
+      
+      // Round allocations
+      const recommendations = {};
+      for (const [category, amount] of Object.entries(allocations)) {
+        recommendations[category] = parseFloat(amount.toFixed(2));
+      }
+      
+      // Prepare chart data
+      const chartData = Object.entries(recommendations).map(([name, value]) => ({
+        name,
+        value
+      }));
+      
+      resolve({
+        recommendations,
+        chartData
+      });
+    }, 1000);
+  });
+};
+
+const Recommendations = () => {
+  const navigate = useNavigate();
+  const { budgetData, resetBudgetData } = useContext(BudgetContext);
+  const [recommendations, setRecommendations] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  
+  // Get recommendations on component mount
+  useEffect(() => {
+    const fetchRecommendations = async () => {
+      try {
+        const data = await getRecommendations(budgetData);
+        setRecommendations(data);
+        setLoading(false);
+      } catch (err) {
+        setError('Failed to generate recommendations. Please try again.');
+        setLoading(false);
+      }
+    };
+    
+    fetchRecommendations();
+  }, [budgetData]);
+  
+  // Format currency
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2
+    }).format(amount);
+  };
+  
+  // Handle restart
+  const handleRestart = () => {
+    resetBudgetData();
+    navigate('/');
+  };
+  
+  // Handle download (mock functionality)
+  const handleDownload = () => {
+    alert('In a real app, this would download a PDF report of your budget recommendations.');
+  };
+  
+  if (loading) {
+    return (
+      <div className="loading-container">
+        <div className="loading-spinner"></div>
+        <p>Calculating your personalized budget...</p>
+      </div>
+    );
+  }
+  
+  if (error) {
+    return (
+      <div className="error-container">
+        <div className="error-icon">⚠️</div>
+        <h2>Something went wrong</h2>
+        <p>{error}</p>
+        <button className="btn-primary" onClick={handleRestart}>
+          Start Over
+        </button>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="recommendations-container">
+      <div className="recommendations-header">
+        <img src={minervaLogo} alt="Minerva Logo" className="logo-small" />
+        <h1 className="app-title">Budget Calculator</h1>
+      </div>
+      
+      <div className="result-container">
+        <h2 className="result-title">Your Personalized Budget</h2>
+        <p className="result-subtitle">
+          Based on your {budgetData.time_preference} income of {formatCurrency(budgetData.income.work_study + budgetData.income.external)} 
+          in {budgetData.location}
+        </p>
+        
+        <div className="results-grid">
+          <div className="chart-container">
+            <h3 className="section-title">Budget Breakdown</h3>
+            <div className="pie-chart-wrapper">
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={recommendations.chartData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={100}
+                    paddingAngle={2}
+                    dataKey="value"
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    labelLine={false}
+                  >
+                    {recommendations.chartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value) => formatCurrency(value)}
+                  />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          
+          <div className="allocations-container">
+            <h3 className="section-title">Recommended Allocations</h3>
+            <div className="allocations-list">
+              {Object.entries(recommendations.recommendations).map(([category, amount]) => (
+                <div key={category} className="allocation-item">
+                  <div className="allocation-category">
+                    <div 
+                      className="category-color" 
+                      style={{ backgroundColor: COLORS[Object.keys(recommendations.recommendations).indexOf(category) % COLORS.length] }}
+                    ></div>
+                    <span>{category}</span>
+                  </div>
+                  <div className="allocation-amount">{formatCurrency(amount)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        
+        <div className="budget-tips">
+          <h3 className="tips-title">Budget Tips</h3>
+          <div className="tips-grid">
+            <div className="tip-card">
+              <h4>Track Your Spending</h4>
+              <p>Use an app or spreadsheet to monitor your actual spending compared to your budget.</p>
+            </div>
+            <div className="tip-card">
+              <h4>Emergency Fund</h4>
+              <p>Aim to build an emergency fund that covers 3-6 months of expenses.</p>
+            </div>
+            <div className="tip-card">
+              <h4>Review Regularly</h4>
+              <p>Revisit your budget every few months or whenever your income changes.</p>
+            </div>
+            <div className="tip-card">
+              <h4>Automate Savings</h4>
+              <p>Set up automatic transfers to your savings account on payday.</p>
+            </div>
+          </div>
+        </div>
+        
+        <div className="action-buttons">
+          <button className="btn-outline" onClick={handleRestart}>
+            <RefreshCw size={18} />
+            Start Over
+          </button>
+          <button className="btn-primary" onClick={handleDownload}>
+            <Download size={18} />
+            Download Report
+          </button>
+          <button className="btn-secondary" onClick={handleRestart}>
+            <Home size={18} />
+            Home
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Recommendations;
